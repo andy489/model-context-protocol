@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+	<IsPublishable>true</IsPublishable>
+	<EnableSdkContainerSupport>true</EnableSdkContainerSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Duende.AccessTokenManagement.OpenIdConnect" />
+    <PackageReference Include="MailKit" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />    
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" />    
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />    
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />    
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CarvedRock-Aspire.ServiceDefaults\CarvedRock-Aspire.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\CarvedRock.Core\CarvedRock.Core.csproj" />
+    <ProjectReference Include="..\MailKit.Client\MailKit.Client.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="emailTemplate.html">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

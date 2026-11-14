@@ -1,0 +1,1 @@
+A2A Inspector Commandsgit clone https://github.com/a2aproject/a2a-inspector.gitcd a2a-inspectordocker build -t a2a-inspector .docker run -d --network host --name a2a-inspector a2a-inspector

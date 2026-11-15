@@ -52,3 +52,7 @@ obj/
 
 # Visual Studio
 .vs/
+.venv/
+
+# Environment files
+.env

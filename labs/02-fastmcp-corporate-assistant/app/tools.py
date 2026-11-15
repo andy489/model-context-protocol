@@ -2,12 +2,15 @@ from fastmcp import FastMCP
 
 tools_server = FastMCP(name="CorporateTools")
 
-# TODO: Define a tool called "list_meeting_rooms" with a description.
-# It should return a list of room names:
-# ["Conference Room A", "Conference Room B", "Board Room", "Focus Room"]
 
-# TODO: Define a tool called "send_email" that accepts recipient (str),
-# subject (str), and body (str).
-# - Raise ValueError if recipient does not contain "@".
-# - Print a confirmation line (mock send).
-# - Return a dict: {"status": "sent", "recipient": ..., "subject": ...}
+@tools_server.tool(description="Returns the list of available meeting rooms.")
+def list_meeting_rooms():
+    return ["Conference Room A", "Conference Room B", "Board Room", "Focus Room"]
+
+
+@tools_server.tool(description="Sends an email to a recipient.")
+def send_email(recipient: str, subject: str, body: str):
+    if "@" not in recipient:
+        raise ValueError("Invalid email address: recipient must contain '@' symbol.")
+    print(f"EMAIL SENT to {recipient}: {subject}")
+    return {"status": "sent", "recipient": recipient, "subject": subject}

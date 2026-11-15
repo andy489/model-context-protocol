@@ -4,41 +4,48 @@ A hands-on lab where you'll build a production-ready MCP server for a **Corporat
 
 ---
 
-## Background: What Is FastMCP?
+## What Problem Does This Solve?
 
-**MCP (Model Context Protocol)** is a standardized wire protocol that lets an LLM client (like Claude, Cursor, or your own app) discover and call capabilities exposed by a server. Those capabilities come in three kinds:
+LLMs like Claude are powerful reasoners, but they are isolated — they can't read your company's employee database, send emails, or look up holiday calendars without being explicitly given that capability.
 
-| Primitive | What it is | When an LLM uses it |
-|-----------|-----------|---------------------|
-| **Resource** | Read-only data endpoint | "Give me the holiday list" |
-| **Prompt** | Reusable text template | "Give me a welcome email template" |
-| **Tool** | Callable action with side effects | "Send this email" |
+**MCP (Model Context Protocol)** is the standard that bridges this gap. It defines a protocol through which an LLM client can:
+1. **Discover** what capabilities a server exposes
+2. **Read** data from it (Resources)
+3. **Use** reusable templates (Prompts)
+4. **Call** actions on it (Tools)
 
-The raw MCP protocol is JSON-RPC over stdin/stdout or HTTP — verbose and low-level. **FastMCP** wraps it in a Pythonic decorator API: you write a plain Python function, add one decorator, and FastMCP handles schema generation, serialization, validation, and routing automatically.
+Without MCP, every LLM integration is custom: a different API, a different schema format, a different way to handle errors. With MCP, any compliant client (Claude Desktop, Cursor, your own app) can connect to any compliant server and immediately understand what it can do.
 
-### What FastMCP does for you
+This lab builds a **Corporate Assistant** MCP server — a fake company backend that exposes employee data, email tools, and document templates. The domain is illustrative; the patterns apply to any real backend.
 
-When you write:
+---
+
+## What Is FastMCP?
+
+The raw MCP protocol is JSON-RPC over HTTP — verbose and low-level. **FastMCP** wraps it in a Pythonic decorator API: you write a plain Python function, add one decorator, and FastMCP handles schema generation, serialization, validation, and routing automatically.
+
+### With FastMCP
 
 ```python
 @mcp.tool(description="Sends an email to a recipient.")
 def send_email(recipient: str, subject: str, body: str):
-    ...
+    if "@" not in recipient:
+        raise ValueError("Invalid email address.")
+    return {"status": "sent", "recipient": recipient}
 ```
 
 FastMCP automatically:
-- reads `recipient`, `subject`, `body` type annotations → generates a JSON schema the LLM sees
-- reads the docstring → fills the description the LLM reads
+- reads type annotations → generates the JSON schema the LLM sees
 - validates incoming arguments before your function runs
 - converts exceptions into proper MCP error responses
 - registers the function in the server's capability list
 
-### How it looks without FastMCP
+### Without FastMCP
 
-Without FastMCP you would implement the raw MCP JSON-RPC protocol manually. A minimal tools handler would look something like this:
+You would hand-write all of this yourself:
 
 ```python
-# Raw MCP over HTTP — what you'd write without FastMCP
+# Raw MCP over HTTP — without FastMCP
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -50,85 +57,38 @@ async def handle(request: Request):
     method = body.get("method")
 
     if method == "tools/list":
-        return JSONResponse({"tools": [
-            {
-                "name": "send_email",
-                "description": "Sends an email to a recipient.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "recipient": {"type": "string"},
-                        "subject":   {"type": "string"},
-                        "body":      {"type": "string"},
-                    },
-                    "required": ["recipient", "subject", "body"],
+        return JSONResponse({"tools": [{
+            "name": "send_email",
+            "description": "Sends an email to a recipient.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "recipient": {"type": "string"},
+                    "subject":   {"type": "string"},
+                    "body":      {"type": "string"},
                 },
-            }
-        ]})
+                "required": ["recipient", "subject", "body"],
+            },
+        }]})
 
     if method == "tools/call":
         args = body["params"]["arguments"]
         if "@" not in args["recipient"]:
             return JSONResponse({"error": {"code": -32000, "message": "Invalid email"}})
-        # ... actual logic
         return JSONResponse({"result": {"status": "sent"}})
 ```
 
-With FastMCP you write **only** the business logic function. All of the schema, routing, and serialization above is generated for you.
+With FastMCP you write **only** the business logic. Everything else is generated.
 
 ---
 
-## Project Structure
+## The Three MCP Primitives
 
-```
-02-fastmcp-corporate-assistant/
-├── app/
-│   ├── data.py        # Shared in-memory data — provided, do not modify
-│   ├── resources.py   # Exercise 1: define Resources
-│   ├── prompts.py     # Exercise 2: define Prompts
-│   ├── tools.py       # Exercise 3: define Tools
-│   └── server.py      # Wires sub-servers together — provided, do not modify
-├── solution/          # Completed reference implementation
-├── client.py          # Test client — run this to verify your work
-├── .env.example
-└── requirements.txt
-```
-
-`app/server.py` and `app/data.py` are already complete. Your work is entirely in `resources.py`, `prompts.py`, and `tools.py`.
-
----
-
-## How the Server Is Structured
-
-Rather than one large file, this lab splits responsibilities across three **sub-servers**, each a standalone `FastMCP` instance:
-
-```python
-# resources.py
-resources_server = FastMCP(name="CorporateResources")
-
-# prompts.py
-prompts_server = FastMCP(name="CorporatePrompts")
-
-# tools.py
-tools_server = FastMCP(name="CorporateTools")
-```
-
-`server.py` then imports and merges them into a single parent server at startup:
-
-```python
-mcp = FastMCP("Corporate Assistant")
-
-async def setup():
-    await mcp.import_server(resources_server)
-    await mcp.import_server(tools_server)
-    await mcp.import_server(prompts_server)
-```
-
-`import_server()` is FastMCP's **server composition** feature — it copies all tools, resources, and prompts from the child into the parent. After `setup()` the parent exposes everything as one unified MCP server. This pattern keeps each concern in its own file while presenting a single endpoint to clients.
-
----
-
-## FastMCP Concepts in Depth
+| Primitive | What it is | When an LLM uses it |
+|-----------|-----------|---------------------|
+| **Resource** | Read-only data endpoint addressed by a URI | "Give me the holiday list for 2025" |
+| **Prompt** | Reusable text template, optionally parameterized | "Give me a welcome email template" |
+| **Tool** | Callable action that can have side effects | "Send this email to Alice" |
 
 ### Resources
 
@@ -143,12 +103,7 @@ def company_holidays():
     return ["2025-01-01", "2025-07-04", "2025-12-25"]
 ```
 
-**What FastMCP generates automatically:**
-- The resource name comes from the function name (`company_holidays`)
-- The MIME type is inferred: lists/dicts → `application/json`, strings → `text/plain`
-- The description comes from the decorator argument (or the docstring if omitted)
-
-**Dynamic resources** use URI templates (RFC 6570). FastMCP extracts template variables and passes them as function arguments:
+**Dynamic resources** use URI templates — FastMCP extracts variables and passes them as arguments:
 
 ```python
 @resources_server.resource("corporate://employees/{employee_id}")
@@ -158,90 +113,199 @@ def get_employee_details(employee_id: str):
 
 A request for `corporate://employees/U123` automatically calls `get_employee_details(employee_id="U123")`.
 
----
-
 ### Prompts
 
-Prompts are reusable text templates. The LLM requests one by name (with optional arguments) and uses the returned text as context or a starting point.
+Prompts are reusable text templates. The LLM requests one by name and uses the returned text as a starting point for its response.
 
 ```python
 @prompts_server.prompt(description="Creates a formatted project status update.")
 def project_status_update(project_name: str, progress: int):
-    return f"""**Status Update**
-
-Project: {project_name}
-Current Progress: {progress}%
-
-Next steps: [LLM should fill this in]"""
+    return f"**{project_name}** — {progress}% complete"
 ```
 
-**What FastMCP generates automatically:**
-- The prompt name comes from the function name (`project_status_update`)
-- Parameters without defaults are **required**; those with defaults are optional
-- Type annotations generate the JSON schema the client uses to validate arguments
-- A `str` return is converted to a single user message; you can also return `list[Message]` for a conversation sequence
-
----
+Parameters without defaults are required; those with defaults are optional. A `str` return becomes a single user message; you can return `list[Message]` for a multi-turn conversation sequence.
 
 ### Tools
 
-Tools are callable actions. Unlike resources, they can have side effects (write to a database, send an email, call an API). The LLM invokes them by name with arguments.
+Tools are callable actions that can have side effects — write to a database, send an email, call an external API.
 
 ```python
 @tools_server.tool(description="Sends an email to a recipient.")
 def send_email(recipient: str, subject: str, body: str):
     if "@" not in recipient:
-        raise ValueError("Invalid email address: recipient must contain '@' symbol.")
-    print(f"EMAIL SENT to {recipient}: {subject}")
+        raise ValueError("Invalid email address: recipient must contain '@'.")
     return {"status": "sent", "recipient": recipient, "subject": subject}
 ```
 
-**What FastMCP generates automatically:**
-- The tool name comes from the function name (`send_email`)
-- Type annotations → JSON schema for the LLM
-- Docstring → description (the decorator `description=` argument overrides it)
-- Any raised exception is caught, logged, and sent back to the client as an MCP error response — you never need to manually serialize errors
+Any raised exception is caught and sent back to the client as a structured MCP error — you never manually serialize errors.
 
-**Return types:** strings become text content; dicts and Pydantic models become structured JSON content that the LLM can parse.
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   LLM Client                        │
+│         (Claude Desktop / Cursor / your app)        │
+└───────────────────────┬─────────────────────────────┘
+                        │  MCP protocol (JSON-RPC over HTTP)
+                        ▼
+┌─────────────────────────────────────────────────────┐
+│              Corporate Assistant MCP Server         │
+│                   app/server.py                     │
+│                                                     │
+│  ┌─────────────────┐  ┌──────────────────────────┐  │
+│  │  resources.py   │  │       prompts.py         │  │
+│  │                 │  │                          │  │
+│  │ company_holidays│  │ generate_welcome_email   │  │
+│  │ get_employee    │  │ project_status_update    │  │
+│  │   _details      │  │                          │  │
+│  └─────────────────┘  └──────────────────────────┘  │
+│                                                     │
+│  ┌─────────────────┐  ┌──────────────────────────┐  │
+│  │    tools.py     │  │        data.py           │  │
+│  │                 │  │                          │  │
+│  │ list_meeting    │  │  employees = {           │  │
+│  │   _rooms        │  │    "U123": {...},        │  │
+│  │ send_email      │  │    "U456": {...},        │  │
+│  │                 │  │  }                       │  │
+│  └─────────────────┘  └──────────────────────────┘  │
+└─────────────────────────────────────────────────────┘
+```
+
+The server is split into **sub-servers** — each file owns one concern:
+
+```python
+# Each file defines its own FastMCP instance
+resources_server = FastMCP(name="CorporateResources")
+prompts_server   = FastMCP(name="CorporatePrompts")
+tools_server     = FastMCP(name="CorporateTools")
+```
+
+`server.py` composes them into one parent server using `mount()`:
+
+```python
+mcp = FastMCP("Corporate Assistant")
+mcp.mount(resources_server)
+mcp.mount(tools_server)
+mcp.mount(prompts_server)
+```
+
+`mount()` copies all capabilities from each sub-server into the parent. The result is a single endpoint at `http://localhost:8000/mcp` that exposes everything. This pattern keeps each concern isolated while presenting a unified API to clients.
+
+---
+
+## Project Structure
+
+```
+02-fastmcp-corporate-assistant/
+├── app/
+│   ├── data.py        # Shared in-memory data — do not modify
+│   ├── resources.py   # Exercise 1: define Resources
+│   ├── prompts.py     # Exercise 2: define Prompts
+│   ├── tools.py       # Exercise 3: define Tools
+│   └── server.py      # Wires sub-servers together — do not modify
+├── solution/          # Completed reference implementation
+├── client.py          # Scripted test client
+├── .env.example
+└── requirements.txt
+```
 
 ---
 
 ## Quickstart
 
-### 1. Create and activate a virtual environment
+Choose either `uv` (recommended on macOS) or the classic `venv` approach.
+
+### Option A — uv (recommended on macOS)
+
+[uv](https://docs.astral.sh/uv/) handles virtual environments automatically. Install it once:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+After installation, restart your terminal or run `source ~/.zshrc` to make `uv` available.
+
+**1. Install dependencies**
+
+```bash
+uv pip install -r requirements.txt
+```
+
+**2. Copy the environment file**
+
+```bash
+cp .env.example .env
+```
+
+**3. Start the server (terminal 1)**
+
+```bash
+uv run python app/server.py
+```
+
+The MCP endpoint is at `http://localhost:8000/mcp`.
+
+**4. Run the test client (terminal 2)**
+
+```bash
+uv run python client.py
+```
+
+---
+
+### Option B — venv + pip
+
+**1. Create and activate a virtual environment**
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-### 2. Install dependencies
+> You must run `source .venv/bin/activate` in every new terminal before running any Python commands.
+
+**2. Install dependencies**
 
 ```bash
-pip3 install -r requirements.txt
+pip install -r requirements.txt
 ```
 
-### 3. Copy the environment file
+**3. Copy the environment file**
 
 ```bash
 cp .env.example .env
 ```
 
-### 4. Start the server (terminal 1)
+**4. Start the server (terminal 1)**
 
 ```bash
-cd app
-python3 server.py
+python3 app/server.py
 ```
 
 The MCP endpoint is at `http://localhost:8000/mcp`.
 
-### 5. Run the test client (terminal 2)
+**5. Run the test client (terminal 2)**
 
 ```bash
-# From the lab root
-source .venv/bin/activate
+source .venv/bin/activate   # if this is a new terminal
 python3 client.py
+```
+
+---
+
+## Testing Options
+
+There are four ways to interact with the running server.
+
+### 1. Scripted test client (quickest verification)
+
+Runs a fixed sequence of calls covering all primitives and error handling:
+
+```bash
+python3 client.py          # venv
+uv run python client.py    # uv
 ```
 
 Expected output when all exercises are complete:
@@ -264,11 +328,45 @@ Correctly caught error for invalid email: ...
 All tests completed successfully!
 ```
 
+### 2. MCP Inspector — browser UI (best for exploration)
+
+A visual interface where you can browse all capabilities and invoke them with a form — no JSON required:
+
+```bash
+npx @modelcontextprotocol/inspector http://localhost:8000/mcp
+```
+
+Opens in your browser automatically.
+
+### 3. Python one-liner (quick ad-hoc calls)
+
+```bash
+python3 -c "
+import asyncio
+from fastmcp import Client
+
+async def main():
+    async with Client('http://localhost:8000/mcp') as c:
+        tools = await c.list_tools()
+        print([t.name for t in tools])
+        result = await c.call_tool('list_meeting_rooms', {})
+        print(result)
+
+asyncio.run(main())
+"
+```
+
+> **Note:** Raw `curl` does not work with this server. FastMCP 4.x uses the Streamable HTTP transport which requires a session handshake — single-shot curl requests return `Missing session ID`. Use the Inspector or the Python client instead.
+
+### 4. Claude Desktop (the real use case)
+
+Add the server to Claude Desktop's MCP config and Claude will discover and call your tools automatically during conversation. This is what the MCP protocol is ultimately designed for.
+
 ---
 
 ## The Exercises
 
-Open `app/resources.py`, `app/prompts.py`, and `app/tools.py` and follow the `# TODO` comments. Use the concepts above to implement each one.
+Open `app/resources.py`, `app/prompts.py`, and `app/tools.py` and follow the `# TODO` comments.
 
 ### Exercise 1 — Resources (`app/resources.py`)
 
@@ -291,7 +389,7 @@ Open `app/resources.py`, `app/prompts.py`, and `app/tools.py` and follow the `# 
 
 ### Add a new employee
 
-Edit `app/data.py` — the dynamic resource picks it up automatically, no other file changes needed:
+Edit `app/data.py` — the dynamic resource picks it up automatically:
 
 ```python
 employees = {
@@ -302,7 +400,7 @@ employees = {
 
 ### Add a new resource / prompt / tool
 
-Add a new decorated function in the corresponding file. `server.py` imports the sub-server object, so the new function is included at next startup — no changes to `server.py` needed.
+Add a decorated function in the corresponding file. `server.py` mounts the sub-server object, so the new function is included at next startup — no changes to `server.py` needed.
 
 ### Change the port
 
@@ -323,6 +421,10 @@ client = Client("http://localhost:9000/mcp")
 The `solution/` directory contains the completed implementation:
 
 ```bash
-cd solution
-python3 server.py
+# uv
+uv run python solution/server.py
+
+# venv
+source .venv/bin/activate
+python3 solution/server.py
 ```

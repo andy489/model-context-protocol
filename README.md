@@ -16,3 +16,4 @@ Course notebooks and materials for learning the Model Context Protocol (MCP).
 Hands-on labs for building MCP servers from scratch.
 
 - [Build a Simple MCP Server](./labs/01-build-simple-mcp-server/README.md) — Build a minimal MCP server with FastAPI and Pydantic, implementing tool discovery and execution
+- [FastMCP Corporate Assistant](./labs/02-fastmcp-corporate-assistant/README.md) — Build a production-ready MCP server with FastMCP exposing resources, prompts, and tools for a corporate assistant
